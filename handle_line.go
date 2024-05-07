@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,11 +71,18 @@ func handleLine(line []byte, o observer) (string, error) {
 }
 
 func parseLine(p []byte) (o observation, err error) {
-	if len(p) <= 0 {
+	switch {
+	case len(p) <= 0:
 		err = errors.New("invalid (empty) line")
-	} else if p[0] == '{' {
+	case p[0] == 'g' && p[1] == 'z':
+		p, err = unZipMsg(p[2:])
+		if err != nil {
+			return
+		}
+		fallthrough
+	case p[0] == '{':
 		err = json.Unmarshal(p, &o)
-	} else {
+	default:
 		err = prometheusUnmarshal(p, &o)
 	}
 	return o, err
@@ -127,4 +135,20 @@ func prometheusUnmarshal(p []byte, o *observation) error {
 	(*o.Value) = value
 
 	return nil
+}
+
+// unZipMsg unzips a gzipped message.
+func unZipMsg(input []byte) ([]byte, error) {
+	reader := bytes.NewReader(input)
+	gzreader, e1 := gzip.NewReader(reader)
+	if e1 != nil {
+		return nil, e1
+	}
+
+	output, e2 := io.ReadAll(gzreader)
+	if e2 != nil {
+		return nil, e2
+	}
+
+	return output, nil
 }

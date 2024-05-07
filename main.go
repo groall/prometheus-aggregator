@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,7 +55,7 @@ func main() {
 	var initial []observation
 	{
 		if *declfile != "" {
-			buf, err := ioutil.ReadFile(*declfile)
+			buf, err := os.ReadFile(*declfile)
 			if err != nil {
 				level.Error(logger).Log("err", err)
 				os.Exit(1)

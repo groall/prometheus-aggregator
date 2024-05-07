@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,6 +93,37 @@ func TestInitialDeclarations(t *testing.T) {
 		foo_total{label="value"} 1.000000
 	`), normalizeResponse(scrape(t, u)); want != have {
 		t.Fatalf("\n---WANT---\n%s\n\n---HAVE---\n%s\n", want, have)
+	}
+}
+
+// TestParseLine is a regression test for a bug in the line parser.
+func TestParseLine(t *testing.T) {
+	// Test that we can parse a line with JSON.
+	msg := []byte(`{"name":"foo_total","type":"counter","help":"Total number of foos."}`)
+	o, err := parseLine(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "foo_total", o.Name; want != have {
+		t.Fatalf("want: %s, have: %s", want, have)
+	}
+
+	// Test that we can parse a line with a gzipped JSON.
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+	if _, err = gz.Write(msg); err != nil {
+		t.Fatal(err)
+	}
+	if err = gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	o, err = parseLine(append([]byte{'g', 'z'}, b.Bytes()...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "foo_total", o.Name; want != have {
+		t.Fatalf("want: %s, have: %s", want, have)
 	}
 }
 

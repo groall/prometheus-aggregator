@@ -113,6 +113,9 @@ myapp_foo_total{} 1
 myapp_foo_total{} 2
 ```
 
+## Compressed message
+If the size of sent observation messages is a problem on your network, you can compress the message with GZIP and mark it with the 'gz' prefix.
+
 ## Labels
 
 Labels are supported in both formats as you might expect.
