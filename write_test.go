@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,11 +32,7 @@ func TestHandleConn(t *testing.T) {
 	fmt.Fprintln(w, `foo{code="412"} 4`)
 
 	// Make a gzipped write to the input of the pipe.
-	var b bytes.Buffer
-	gz := gzip.NewWriter(&b)
-	gz.Write([]byte(`{"name":"foo","labels":{"code":"412"},"value":3}`))
-	gz.Close()
-	fmt.Fprintln(w, string(append([]byte{'g', 'z'}, b.Bytes()...)))
+	fmt.Fprintln(w, string(compressData([]byte(`{"name":"foo","labels":{"code":"412"},"value":3}`))))
 
 	// Close the pipe, and wait for the handleDirectWrites goroutine to exit.
 	w.Close()

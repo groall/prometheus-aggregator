@@ -114,7 +114,7 @@ myapp_foo_total{} 2
 ```
 
 ## Compressed message
-If the size of sent observation messages is a problem on your network, you can compress the message with GZIP and mark it with the 'gz' prefix.
+If the size of sent observation messages is a problem on your network (and you have a ton of CPU), you can compress messages with GZIP.
 
 ## Labels
 

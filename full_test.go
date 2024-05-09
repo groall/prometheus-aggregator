@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestThreeTypes(t *testing.T) {
@@ -105,25 +109,7 @@ func TestParseLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want, have := "foo_total", o.Name; want != have {
-		t.Fatalf("want: %s, have: %s", want, have)
-	}
-
-	// Test that we can parse a line with a gzipped JSON.
-	var b bytes.Buffer
-	gz := gzip.NewWriter(&b)
-	if _, err = gz.Write(msg); err != nil {
-		t.Fatal(err)
-	}
-	if err = gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	o, err = parseLine(append([]byte{'g', 'z'}, b.Bytes()...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want, have := "foo_total", o.Name; want != have {
-		t.Fatalf("want: %s, have: %s", want, have)
+		t.Fatalf("\n---WANT---\n%s\n\n---HAVE---\n%s\n", want, have)
 	}
 }
 
@@ -162,4 +148,121 @@ func normalizeResponse(s string) string {
 		lines[i] = strings.TrimSpace(lines[i])
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+type mockPacketConn struct {
+	data []byte
+	err  error
+}
+
+func (c *mockPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) { return len(p), nil }
+func (c *mockPacketConn) Close() error                                 { return nil }
+func (c *mockPacketConn) LocalAddr() net.Addr                          { return nil }
+func (c *mockPacketConn) RemoteAddr() net.Addr                         { return nil }
+func (c *mockPacketConn) SetDeadline(t time.Time) error                { return nil }
+func (c *mockPacketConn) SetReadDeadline(t time.Time) error            { return nil }
+func (c *mockPacketConn) SetWriteDeadline(t time.Time) error           { return nil }
+
+func (m *mockPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
+	copy(buf, m.data)
+	return len(m.data), nil, m.err
+}
+
+func TestReadFromPacketConn(t *testing.T) {
+	expectedOutput := []byte("Hello, World!")
+	compressedData := compressData(expectedOutput)
+	mockConn := &mockPacketConn{data: compressedData, err: nil}
+
+	// check that we can read gzipped data from the packet conn
+	output, err := readFromPacketConn(mockConn, make([]byte, len(compressedData)))
+	if err != nil {
+		t.Errorf("readFromPacketConn returned an error: %v", err)
+	}
+
+	if !reflect.DeepEqual(output, expectedOutput) {
+		t.Errorf("readFromPacketConn did not return the expected output. Got: %s, Expected: %s", output, expectedOutput)
+	}
+
+	// test that we can read uncompressed data
+	mockConn = &mockPacketConn{data: expectedOutput, err: nil}
+	output, err = readFromPacketConn(mockConn, make([]byte, len(expectedOutput)))
+	if err != nil {
+		t.Errorf("readFromPacketConn returned an error: %v", err)
+	}
+
+	if !reflect.DeepEqual(output, expectedOutput) {
+		t.Errorf("readFromPacketConn did not return the expected output. Got: %s, Expected: %s", output, expectedOutput)
+	}
+}
+
+func TestUnZipData(t *testing.T) {
+	expectedOutput := []byte("Hello, World!")
+
+	compressedData := compressData(expectedOutput)
+
+	output, err := unZipData(compressedData)
+	if err != nil {
+		t.Errorf("unZipData returned an error: %v", err)
+	}
+
+	if !reflect.DeepEqual(output, expectedOutput) {
+		t.Errorf("unZipData did not return the expected output. Got: %s, Expected: %s", output, expectedOutput)
+	}
+}
+
+func compressData(data []byte) []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err := gz.Write(data)
+	if err != nil {
+		panic(err)
+	}
+	err = gz.Close()
+	if err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func TestIsGzipped(t *testing.T) {
+	testCases := []struct {
+		input    []byte
+		expected bool
+	}{
+		{[]byte{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}, true},  // Gzipped data
+		{[]byte{31, 139}, true},                            // Gzipped data with minimum length
+		{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, false},      // Not gzipped data
+		{[]byte{31, 138, 8, 0, 0, 0, 0, 0, 0, 255}, false}, // Not gzipped data
+	}
+
+	for _, tc := range testCases {
+		result := isGzipped(tc.input)
+		if result != tc.expected {
+			t.Errorf("isGzipped have %v for input %v, want %v", result, tc.input, tc.expected)
+		}
+	}
+}
+
+func TestTransparentDecompressGZip(t *testing.T) {
+	testCases := []struct {
+		input          []byte
+		expectedOutput []byte
+		expectedError  error
+	}{
+		{compressData([]byte("Hello, World!")), []byte("Hello, World!"), nil},      // Gzipped data
+		{[]byte("Hello, World!"), []byte("Hello, World!"), nil},                    // Gzipped data
+		{[]byte{31, 139, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, gzip.ErrHeader}, // Non-gzipped data
+	}
+
+	for _, tc := range testCases {
+		output, err := transparentDecompressGZip(tc.input)
+
+		if !reflect.DeepEqual(output, tc.expectedOutput) {
+			t.Errorf("transparentDecompressGZip did not return the expected output. Have: %v, Want: %v", output, tc.expectedOutput)
+		}
+
+		if !errors.Is(err, tc.expectedError) {
+			t.Errorf("transparentDecompressGZip returned unexpected error. Have: %v, Want: %v", err, tc.expectedError)
+		}
+	}
 }

@@ -17,14 +17,24 @@ import (
 
 type observer interface{ observe(observation) error }
 
+// readFromPacketConn reads a packet from the given packet connection and returns the data as a byte slice. The data is transparently decompressed if it is gzipped.
+func readFromPacketConn(conn net.PacketConn, buf []byte) ([]byte, error) {
+	n, _, err := conn.ReadFrom(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return transparentDecompressGZip(buf[:n])
+}
+
 func forwardPacketConn(conn net.PacketConn, o observer, logger log.Logger) error {
 	buf := make([]byte, bufio.MaxScanTokenSize)
 	for {
-		n, _, err := conn.ReadFrom(buf)
+		packet, err := readFromPacketConn(conn, buf)
 		if err != nil {
 			return err
 		}
-		name, err := handleLine(buf[:n], o)
+		name, err := handleLine(packet, o)
 		if err != nil {
 			level.Error(logger).Log("line", "rejected", "err", err)
 			continue
@@ -47,7 +57,12 @@ func handleConn(rc io.ReadCloser, o observer, strict bool, logger log.Logger) {
 	defer rc.Close()
 	s := bufio.NewScanner(rc)
 	for s.Scan() {
-		name, err := handleLine(s.Bytes(), o)
+		data, err := transparentDecompressGZip(s.Bytes())
+		if err != nil {
+			level.Error(logger).Log("line", "rejected", "err", err)
+			continue
+		}
+		name, err := handleLine(data, o)
 		if err != nil {
 			level.Error(logger).Log("line", "rejected", "err", err)
 			if strict {
@@ -71,18 +86,11 @@ func handleLine(line []byte, o observer) (string, error) {
 }
 
 func parseLine(p []byte) (o observation, err error) {
-	switch {
-	case len(p) <= 0:
+	if len(p) <= 0 {
 		err = errors.New("invalid (empty) line")
-	case p[0] == 'g' && p[1] == 'z':
-		p, err = unZipMsg(p[2:])
-		if err != nil {
-			return
-		}
-		fallthrough
-	case p[0] == '{':
+	} else if p[0] == '{' {
 		err = json.Unmarshal(p, &o)
-	default:
+	} else {
 		err = prometheusUnmarshal(p, &o)
 	}
 	return o, err
@@ -137,9 +145,12 @@ func prometheusUnmarshal(p []byte, o *observation) error {
 	return nil
 }
 
-// unZipMsg unzips a gzipped message.
-func unZipMsg(input []byte) ([]byte, error) {
-	reader := bytes.NewReader(input)
+// unZipData is a Go function that takes a byte slice as input and returns a byte slice and an error.
+//
+// It reads the input data as a gzip-compressed stream and decompresses it. The decompressed data is then returned as a byte slice.
+// If any error occurs during the decompression process, the function returns the error.
+func unZipData(data []byte) ([]byte, error) {
+	reader := bytes.NewReader(data)
 	gzreader, e1 := gzip.NewReader(reader)
 	if e1 != nil {
 		return nil, e1
@@ -151,4 +162,18 @@ func unZipMsg(input []byte) ([]byte, error) {
 	}
 
 	return output, nil
+}
+
+// transparentDecompressGZip decompresses data if it is gzipped.
+func transparentDecompressGZip(data []byte) ([]byte, error) {
+	if isGzipped(data) { // gzip
+		return unZipData(data)
+	}
+
+	return data, nil
+}
+
+// isGzipped checks if the given byte slice represents a gzip-compressed stream.
+func isGzipped(packet []byte) bool {
+	return len(packet) >= 2 && packet[0] == 31 && packet[1] == 139
 }
