@@ -155,13 +155,13 @@ type mockPacketConn struct {
 	err  error
 }
 
-func (c *mockPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) { return len(p), nil }
-func (c *mockPacketConn) Close() error                                 { return nil }
-func (c *mockPacketConn) LocalAddr() net.Addr                          { return nil }
-func (c *mockPacketConn) RemoteAddr() net.Addr                         { return nil }
-func (c *mockPacketConn) SetDeadline(t time.Time) error                { return nil }
-func (c *mockPacketConn) SetReadDeadline(t time.Time) error            { return nil }
-func (c *mockPacketConn) SetWriteDeadline(t time.Time) error           { return nil }
+func (c *mockPacketConn) WriteTo(p []byte, _ net.Addr) (int, error) { return len(p), nil }
+func (c *mockPacketConn) Close() error                              { return nil }
+func (c *mockPacketConn) LocalAddr() net.Addr                       { return nil }
+func (c *mockPacketConn) RemoteAddr() net.Addr                      { return nil }
+func (c *mockPacketConn) SetDeadline(time.Time) error               { return nil }
+func (c *mockPacketConn) SetReadDeadline(time.Time) error           { return nil }
+func (c *mockPacketConn) SetWriteDeadline(time.Time) error          { return nil }
 
 func (m *mockPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
 	copy(buf, m.data)
@@ -255,7 +255,7 @@ func TestTransparentDecompressGZip(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		output, err := transparentDecompressGZip(tc.input)
+		output, err := decompressIfGzipped(tc.input)
 
 		if !reflect.DeepEqual(output, tc.expectedOutput) {
 			t.Errorf("transparentDecompressGZip did not return the expected output. Have: %v, Want: %v", output, tc.expectedOutput)
