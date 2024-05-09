@@ -147,7 +147,7 @@ func prometheusUnmarshal(p []byte, o *observation) error {
 	return nil
 }
 
-// unZipData is a Go function that takes a byte slice as input and returns a byte slice and an error.
+// unZipData decompresses gzipped data.
 func unZipData(data []byte) ([]byte, error) {
 	reader := bytes.NewReader(data)
 	gzreader, e1 := gzip.NewReader(reader)
